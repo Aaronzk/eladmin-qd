@@ -1,24 +1,27 @@
 <template>
   <div class="app-container">
-    <eHeader :query="query" :dicts="dicts"/>
+    <!--工具栏-->
+    <div class="head-container">
+      <eHeader :dict="dict" :permission="permission" />
+      <crudOperation :permission="permission" />
+    </div>
     <!--表格渲染-->
-    <el-table v-loading="loading" :data="data" size="small" style="width: 100%;">
-      <el-table-column prop="name" label="名称"/>
-      <el-table-column label="所属部门">
+    <el-table ref="table" v-loading="crud.loading" :data="crud.data" style="width: 100%;" @selection-change="crud.selectionChangeHandler">
+      <el-table-column type="selection" width="55" />
+      <el-table-column prop="name" label="名称" />
+      <el-table-column prop="jobSort" label="排序">
         <template slot-scope="scope">
-          <div>{{ scope.row.dept.name }}</div>
+          {{ scope.row.jobSort }}
         </template>
       </el-table-column>
-      <el-table-column prop="sort" label="排序">
+      <el-table-column prop="status" label="状态" align="center">
         <template slot-scope="scope">
-          {{ scope.row.sort }}
-        </template>
-      </el-table-column>
-      <el-table-column label="状态" align="center">
-        <template slot-scope="scope">
-          <div v-for="item in dicts" :key="item.id">
-            <el-tag v-if="scope.row.enabled.toString() === item.value" :type="scope.row.enabled ? '' : 'info'">{{ item.label }}</el-tag>
-          </div>
+          <el-switch
+            v-model="scope.row.enabled"
+            active-color="#409EFF"
+            inactive-color="#F56C6C"
+            @change="changeEnabled(scope.row, scope.row.enabled)"
+          />
         </template>
       </el-table-column>
       <el-table-column prop="createTime" label="创建日期">
@@ -26,92 +29,87 @@
           <span>{{ parseTime(scope.row.createTime) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="150px" align="center">
+      <!--   编辑与删除   -->
+      <el-table-column
+        v-permission="['admin','job:edit','job:del']"
+        label="操作"
+        width="130px"
+        align="center"
+        fixed="right"
+      >
         <template slot-scope="scope">
-          <edit v-if="checkPermission(['ADMIN','USERJOB_ALL','USERJOB_EDIT'])" :dicts="dicts" :data="scope.row" :sup_this="sup_this"/>
-          <el-popover
-            v-if="checkPermission(['ADMIN','USERJOB_ALL','USERJOB_DELETE'])"
-            :ref="scope.row.id"
-            placement="top"
-            width="180">
-            <p>确定删除本条数据吗？</p>
-            <div style="text-align: right; margin: 0">
-              <el-button size="mini" type="text" @click="$refs[scope.row.id].doClose()">取消</el-button>
-              <el-button :loading="delLoading" type="primary" size="mini" @click="subDelete(scope.row.id)">确定</el-button>
-            </div>
-            <el-button slot="reference" type="danger" size="mini">删除</el-button>
-          </el-popover>
+          <udOperation
+            :data="scope.row"
+            :permission="permission"
+          />
         </template>
       </el-table-column>
     </el-table>
     <!--分页组件-->
-    <el-pagination
-      :total="total"
-      style="margin-top: 8px;"
-      layout="total, prev, pager, next, sizes"
-      @size-change="sizeChange"
-      @current-change="pageChange"/>
+    <pagination />
+    <!--表单渲染-->
+    <eForm :job-status="dict.job_status" />
   </div>
 </template>
 
 <script>
-import checkPermission from '@/utils/permission'
-import initData from '@/mixins/initData'
-import initDict from '@/mixins/initDict'
-import { del } from '@/api/job'
-import { parseTime } from '@/utils/index'
+import crudJob from '@/api/system/job'
 import eHeader from './module/header'
-import edit from './module/edit'
+import eForm from './module/form'
+import CRUD, { presenter } from '@crud/crud'
+import crudOperation from '@crud/CRUD.operation'
+import pagination from '@crud/Pagination'
+import udOperation from '@crud/UD.operation'
+
 export default {
-  components: { eHeader, edit },
-  mixins: [initData, initDict],
-  data() {
-    return {
-      delLoading: false, sup_this: this
-    }
-  },
-  created() {
-    this.$nextTick(() => {
-      this.init()
-      // 加载数据字典
-      this.getDict('job_status')
+  name: 'Job',
+  components: { eHeader, eForm, crudOperation, pagination, udOperation },
+  cruds() {
+    return CRUD({
+      title: '岗位',
+      url: 'api/job',
+      sort: ['jobSort,asc', 'id,desc'],
+      crudMethod: { ...crudJob }
     })
   },
+  mixins: [presenter()],
+  // 数据字典
+  dicts: ['job_status'],
+  data() {
+    return {
+      permission: {
+        add: ['admin', 'job:add'],
+        edit: ['admin', 'job:edit'],
+        del: ['admin', 'job:del']
+      }
+    }
+  },
   methods: {
-    parseTime,
-    checkPermission,
-    beforeInit() {
-      this.url = 'api/job'
-      const sort = 'sort,asc'
-      this.params = { page: this.page, size: this.size, sort: sort }
-      const query = this.query
-      const value = query.value
-      const enabled = query.enabled
-      if (value) { this.params['name'] = value }
-      if (enabled !== '' && enabled !== null) { this.params['enabled'] = enabled }
-      return true
-    },
-    subDelete(id) {
-      this.delLoading = true
-      del(id).then(res => {
-        this.delLoading = false
-        this.$refs[id].doClose()
-        this.init()
-        this.$notify({
-          title: '删除成功',
-          type: 'success',
-          duration: 2500
+    // 改变状态
+    changeEnabled(data, val) {
+      this.$confirm('此操作将 "' + this.dict.label.job_status[val] + '" ' + data.name + '岗位, 是否继续？', '提示', {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }).then(() => {
+        // eslint-disable-next-line no-undef
+        crudJob.edit(data).then(() => {
+          // eslint-disable-next-line no-undef
+          this.crud.notify(this.dict.label.job_status[val] + '成功', 'success')
+        }).catch(err => {
+          data.enabled = !data.enabled
+          console.log(err.data.message)
         })
-      }).catch(err => {
-        this.delLoading = false
-        this.$refs[id].doClose()
-        console.log(err.response.data.message)
+      }).catch(() => {
+        data.enabled = !data.enabled
       })
     }
   }
 }
 </script>
 
-<style scoped>
-
+<style rel="stylesheet/scss" lang="scss" scoped>
+ ::v-deep .el-input-number .el-input__inner {
+    text-align: left;
+  }
 </style>

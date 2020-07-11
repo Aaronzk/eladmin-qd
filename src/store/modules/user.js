@@ -1,4 +1,4 @@
-import { login, getInfo } from '@/api/login'
+import { login, getInfo, logout } from '@/api/login'
 import { getToken, setToken, removeToken } from '@/utils/auth'
 
 const user = {
@@ -28,11 +28,9 @@ const user = {
   actions: {
     // 登录
     Login({ commit }, userInfo) {
-      const username = userInfo.username
-      const password = userInfo.password
       const rememberMe = userInfo.rememberMe
       return new Promise((resolve, reject) => {
-        login(username, password).then(res => {
+        login(userInfo.username, userInfo.password, userInfo.code, userInfo.uuid).then(res => {
           setToken(res.token, rememberMe)
           commit('SET_TOKEN', res.token)
           setUserInfo(res.user, commit)
@@ -56,14 +54,16 @@ const user = {
         })
       })
     },
-
     // 登出
     LogOut({ commit }) {
       return new Promise((resolve, reject) => {
-        commit('SET_TOKEN', '')
-        commit('SET_ROLES', [])
-        removeToken()
-        resolve()
+        logout().then(res => {
+          logOut(commit)
+          resolve()
+        }).catch(error => {
+          logOut(commit)
+          reject(error)
+        })
       })
     },
 
@@ -75,6 +75,12 @@ const user = {
   }
 }
 
+export const logOut = (commit) => {
+  commit('SET_TOKEN', '')
+  commit('SET_ROLES', [])
+  removeToken()
+}
+
 export const setUserInfo = (res, commit) => {
   // 如果没有任何权限，则赋予一个默认的权限，避免请求死循环
   if (res.roles.length === 0) {
@@ -82,7 +88,7 @@ export const setUserInfo = (res, commit) => {
   } else {
     commit('SET_ROLES', res.roles)
   }
-  commit('SET_USER', res)
+  commit('SET_USER', res.user)
 }
 
 export default user
